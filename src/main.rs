@@ -52,7 +52,8 @@ fn prompt_map(command_count: u64, history_count: u64) -> HashMap<char, impl AsRe
         '!' => history_count.to_string(),
         'v' => format!("{}.{}", env!("CARGO_PKG_VERSION_MAJOR"), env!("CARGO_PKG_VERSION_MINOR")),
         'V' => env!("CARGO_PKG_VERSION").to_string(),
-        'h' => gethostname().to_string_lossy().to_string()
+        'h' => gethostname().to_string_lossy().to_string().split(".").collect::<Vec<&str>>()[0].to_string(),
+        'H' => gethostname().to_string_lossy().to_string()
     )
 }
 
