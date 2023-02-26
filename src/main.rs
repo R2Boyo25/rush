@@ -10,6 +10,7 @@ use rustyline::history::History;
 use rustyline::DefaultEditor;
 use shlex;
 
+use chrono::Local;
 use time::macros::format_description;
 use time::OffsetDateTime;
 
@@ -22,10 +23,55 @@ use crate::flags::{Flags, FLUT};
 
 #[derive(Debug)]
 enum State {
-    Exec(String),    // Command currently running
-    MainPrompt(i32), // PS1
-    BefrPrompt,      // PS0
-    ContPrompt,      // PS2
+    Exec(String), // Command currently running
+    MainPrompt,   // PS1
+    BefrPrompt,   // PS0
+    ContPrompt,   // PS2
+}
+
+fn strftime_replace(s: String) -> Result<String, String> {
+    let mut outbuf: String = Default::default();
+    let mut tmpbuf: String = Default::default();
+    let mut inesc: bool = false;
+    let mut insub: bool = false;
+    let mut infmt: bool = false;
+
+    for chr in s.chars() {
+        match chr {
+            '%' if !infmt => inesc = true,
+            'D' if inesc => {
+                inesc = false;
+                insub = true;
+            }
+            _ if inesc => {
+                outbuf += "%";
+                outbuf += &chr.to_string();
+                inesc = false;
+            }
+            '{' if insub => {
+                infmt = true;
+                insub = false;
+            }
+            _ if insub => insub = false,
+            '}' if infmt => {
+                outbuf += &Local::now().format(&tmpbuf).to_string();
+                infmt = false;
+                tmpbuf = Default::default();
+            }
+            _ if infmt => tmpbuf += &chr.to_string(),
+            _ => outbuf += &chr.to_string(),
+        }
+    }
+
+    if insub {
+        return Err("Unopened date expression; use like %D{format}".to_string());
+    }
+
+    if infmt {
+        return Err("Unclosed date expression".to_string());
+    }
+
+    Ok(outbuf)
 }
 
 fn get_prompt<'a>(
@@ -33,10 +79,16 @@ fn get_prompt<'a>(
     default: &'a str,
     mapping: HashMap<char, impl AsRef<str>>,
 ) -> String {
-    match unescape_mapped(env::var(varname).unwrap_or(default.to_string()), mapping) {
-        Ok(prompt) => prompt,
+    match strftime_replace(env::var(varname).unwrap_or(default.to_string())) {
+        Ok(prompt) => match unescape_mapped(prompt, mapping) {
+            Ok(prompt) => prompt,
+            Err(err) => {
+                println!("rush: ${}: {}", varname, err);
+                default.to_string()
+            }
+        },
         Err(err) => {
-            println!("rush: ${}: {}", varname, err);
+            println!("rush: ${}: %D: {}", varname, err);
             default.to_string()
         }
     }
@@ -120,14 +172,15 @@ fn main() {
     )
     .unwrap();
 
-    let mut state: State = State::MainPrompt(0);
+    let mut state: State = State::MainPrompt;
     let mut flags: Flags = Flags::from_bits(0).unwrap();
     let mut command_count: u64 = 0;
+    let mut status: i32 = 0;
 
     loop {
         let history_count: u64 = rl.history().len().try_into().unwrap();
         match state {
-            State::MainPrompt(_status) => {
+            State::MainPrompt => {
                 let readline = rl.readline(&get_prompt(
                     "PS1",
                     "rush$ ",
@@ -151,12 +204,10 @@ fn main() {
                 }
             }
             State::Exec(ref command) => {
-                let mut status: i32 = 0;
-
                 match shlex::split(command) {
                     Some(argv) => {
                         if argv.len() < 1 {
-                            state = State::MainPrompt(status);
+                            state = State::MainPrompt;
                             continue;
                         }
 
@@ -175,17 +226,22 @@ fn main() {
                             "format" => {
                                 println!(
                                     "{}",
-                                    match unescape_mapped(
-                                        argv[1..].join(" "),
-                                        prompt_map(command_count, history_count)
-                                    ) {
-                                        Ok(prompt) => {
-                                            prompt
-                                        }
+                                    match strftime_replace(argv[1..].join(" ")) {
+                                        Ok(prompt) => match unescape_mapped(
+                                            prompt,
+                                            prompt_map(command_count, history_count)
+                                        ) {
+                                            Ok(prompt) => {
+                                                prompt
+                                            }
+                                            Err(error) => {
+                                                status = 1;
+                                                format!("rush: format: {}", error)
+                                            }
+                                        },
                                         Err(error) => {
                                             status = 1;
-                                            println!("rush: prompt: {}", error);
-                                            argv[1..].join(" ")
+                                            format!("rush: format: %D: {}", error)
                                         }
                                     }
                                 )
@@ -243,7 +299,7 @@ fn main() {
                     break;
                 }
 
-                state = State::MainPrompt(status);
+                state = State::MainPrompt;
             }
             unknown => todo!("Unimplemented state: {:?}", unknown),
         };
