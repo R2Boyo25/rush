@@ -1,5 +1,6 @@
 use common_macros::hash_map;
 use gethostname::gethostname;
+use nix::unistd::ttyname;
 use std::collections::HashMap;
 use std::env;
 
@@ -8,6 +9,9 @@ use rustyline::error::ReadlineError;
 use rustyline::history::History;
 use rustyline::DefaultEditor;
 use shlex;
+
+use time::macros::format_description;
+use time::OffsetDateTime;
 
 use users::{get_current_uid, get_user_by_uid};
 
@@ -52,8 +56,54 @@ fn prompt_map(command_count: u64, history_count: u64) -> HashMap<char, impl AsRe
         '!' => history_count.to_string(),
         'v' => format!("{}.{}", env!("CARGO_PKG_VERSION_MAJOR"), env!("CARGO_PKG_VERSION_MINOR")),
         'V' => env!("CARGO_PKG_VERSION").to_string(),
-        'h' => gethostname().to_string_lossy().to_string().split(".").collect::<Vec<&str>>()[0].to_string(),
-        'H' => gethostname().to_string_lossy().to_string()
+        'h' => gethostname().to_string_lossy().to_string().split(".").last().unwrap().to_string(),
+        'H' => gethostname().to_string_lossy().to_string(),
+        'l' => match ttyname(0) {
+            Ok(name) => match name.file_name() {
+                Some(fname) => fname.to_str().unwrap().to_string(),
+                None => "err".to_string()
+            }
+            Err(_) => "err".to_string()
+        },
+        's' => env::args().last().unwrap().split("/").last().unwrap().to_string(),
+        'w' => env::current_dir().expect("No idea where we are. (env::current_dir())").to_string_lossy().to_string().replace(env::var("HOME").unwrap_or("/home/".to_string() + &get_user_by_uid(get_current_uid()).unwrap().name().to_string_lossy()).as_str(), "~/").replace("//", "/"),
+        'W' => env::current_dir().expect("No idea where we are. (env::current_dir())").to_string_lossy().to_string().replace(env::var("HOME").unwrap_or("/home/".to_string() + &get_user_by_uid(get_current_uid()).unwrap().name().to_string_lossy()).as_str(), "~/").replace("//", "/").split("/").last().unwrap().to_string(),
+        'd' => match OffsetDateTime::now_local() {
+            Ok(curtime) => match curtime.format(format_description!("[weekday], [month repr:short] [day]")) {
+                Ok(formatted_date) => formatted_date,
+                Err(_) => "???, ??? ??".to_string()
+            }
+            Err(_) => "???, ??? ??".to_string()
+        },
+        't' => match OffsetDateTime::now_local() {
+            Ok(curtime) => match curtime.format(format_description!("[hour]:[minute]:[second]")) {
+                Ok(formatted_time) => formatted_time,
+                Err(_) => "??:??:??".to_string()
+            }
+            Err(_) => "??:??:??".to_string()
+        },
+        'T' => match OffsetDateTime::now_local() {
+            Ok(curtime) => match curtime.format(format_description!("[hour repr:12]:[minute]:[second] [period]")) {
+                Ok(formatted_time) => formatted_time,
+                Err(_) => "??:??:??".to_string()
+            }
+            Err(_) => "??:??:??".to_string()
+        },
+        '@' => match OffsetDateTime::now_local() {
+            Ok(curtime) => match curtime.format(format_description!("[hour repr:12]:[minute] [period]")) {
+                Ok(formatted_time) => formatted_time,
+                Err(_) => "??:?? ?M".to_string()
+            }
+            Err(_) => "??:?? ?M".to_string()
+        },
+        'A' => match OffsetDateTime::now_local() {
+            Ok(curtime) => match curtime.format(format_description!("[hour]:[minute]")) {
+                Ok(formatted_time) => formatted_time,
+                Err(_) => "??:??".to_string()
+            }
+            Err(_) => "??:??".to_string()
+        },
+        // %e - execution time
     )
 }
 
